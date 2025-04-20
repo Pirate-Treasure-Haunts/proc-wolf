@@ -1,0 +1,40 @@
+optionally notify, kill, or nuke the process (e.g., taskkill, sc stop, sc delete)
+
+escalate from soft kill → force kill → service delete (if perms allow)
+
+optionally run at boot, or as a persistent background task
+
+want me to:
+
+start with a base script for Windows in Python that does the full scan + escalation loop?
+
+add config file support so you can list names + response tiers?
+
+maybe give it a chill name? “HUNTER-k” or “ProcPurge™” or “WRAITH”?
+
+
+Perfect, fren — CLI-only proc-wolf coming right up. We'll make it a clean, modular Python script that:
+
+Watches for specific process names.
+
+Escalates actions from SIGTERM to SIGKILL.
+
+Optionally logs attempts with timestamps.
+
+Can be expanded later to include service disabling, memory dumps, or reboot traps.
+
+You want it looped like a daemon? Or more like a one-shot cron-friendly version first?
+
+
+
+Once confirmed working, we’ll move on to:
+
+Logging to Event Viewer
+
+System Tray notifier (optional)
+
+Config file for targets
+
+Watch specific services, not just processes
+
+Want to proceed after it's running clean?
