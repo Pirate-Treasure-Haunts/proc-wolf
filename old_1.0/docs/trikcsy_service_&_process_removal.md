@@ -69,7 +69,7 @@ https://learn.microsoft.com/en-us/sysinternals/downloads/sysinternals-suite
 - Open `regedit.exe` as Administrator
 - Navigate to:
 sql
-`HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\P9RdrService_85a94`
+`HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\xxxxxService_xxxxx`
 `Rgt-clck` the key → Delete
 
 # Final Cleanup
