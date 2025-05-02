@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""
+proc-wolf-service: Windows service version of proc-wolf
+------------------------------------------------------
+Runs proc-wolf as a background Windows service
+"""
+
+import os
+import sys
+import time
+import logging
+import servicemanager
+import win32event
+import win32service
+import win32serviceutil
+
+# Ensure we can import from proc-wolf
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from proc_wolf import Database, monitor_processes, init_database
+
+# Configure logging to a file in a standard location
+log_file = os.path.join(os.environ.get('PROGRAMDATA', r'C:\ProgramData'), 'proc-wolf', 'proc-wolf-service.log')
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename=log_file,
+    filemode='a'
+)
+
+class ProcWolfService(win32serviceutil.ServiceFramework):
+    """Windows Service class for proc-wolf"""
+    
+    _svc_name_ = 'ProcWolfService'
+    _svc_display_name_ = 'Proc-Wolf Process Monitor'
+    _svc_description_ = 'Monitors system processes for suspicious activity and protects against threats.'
+    
+    def __init__(self, args):
+        win32serviceutil.ServiceFramework.__init__(self, args)
+        self.stop_event = win32event.CreateEvent(None, 0, 0, None)
+        self.is_running = False
+    
+    def SvcStop(self):
+        """Called when the service is asked to stop"""
+        logging.info('Service stop requested')
+        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        win32event.SetEvent(self.stop_event)
+        self.is_running = False
+    
+    def SvcDoRun(self):
+        """Called when the service is starting"""
+        servicemanager.LogMsg(
+            servicemanager.EVENTLOG_INFORMATION_TYPE,
+            servicemanager.PYS_SERVICE_STARTED,
+            (self._svc_name_, '')
+        )
+        self.is_running = True
+        self.main()
+    
+    def main(self):
+        """Main service function"""
+        logging.info('ProcWolf service starting')
+        
+        try:
+            # Initialize database
+            db = init_database()
+            
+            # Start monitoring processes
+            monitor_processes(db)
+        except Exception as e:
+            logging.error(f'Error in service main: {e}')
+        
+        logging.info('ProcWolf service stopped')
+
+if __name__ == '__main__':
+    if len(sys.argv) == 1:
+        servicemanager.Initialize()
+        servicemanager.PrepareToHostSingle(ProcWolfService)
+        servicemanager.StartServiceCtrlDispatcher()
+    else:
+        win32serviceutil.HandleCommandLine(ProcWolfService)

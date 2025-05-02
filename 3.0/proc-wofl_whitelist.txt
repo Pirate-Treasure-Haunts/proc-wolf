@@ -1,0 +1,28 @@
+# proc-wolf whitelist
+# Add applications and paths that should never be considered threats
+
+# Browsers
+chrome.exe
+msedge.exe
+firefox.exe
+vivaldi.exe
+brave.exe
+opera.exe
+
+# Common developer tools
+code.exe
+vs_code.exe
+visual studio code.exe
+idea64.exe
+pycharm64.exe
+
+# System utilities
+WindowsTerminal.exe
+SnippingTool.exe
+explorer.exe
+
+# Add paths (everything in these paths is trusted)
+C:\Program Files\Microsoft VS Code
+C:\Program Files\Vivaldi
+C:\Program Files\Google\Chrome
+C:\Windows\System32
