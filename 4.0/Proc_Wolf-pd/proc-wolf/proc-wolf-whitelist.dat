@@ -1,0 +1,41 @@
+# proc-wolf secure whitelist
+# DO NOT MODIFY THIS FILE MANUALLY - USE THE MANAGEMENT INTERFACE
+# Any manual changes will invalidate the security signature
+
+C:\Program Files\Google\Chrome/
+C:\Program Files\Microsoft VS Code/
+C:\Program Files\Vivaldi/
+C:\Windows\System32/
+PROCWOLF.EXE
+PROCWOLFCLI.EXE
+PROCWOLFSERVICE.EXE
+PYTHON.EXE
+ProcWolf.exe
+ProcWolfCLI.exe
+ProcWolfService.exe
+Python.exe
+brave.exe
+c:\windows\explorer.exe
+c:\windows\system32/
+chrome.exe
+cmd.exe
+code.exe
+eclipse.exe
+explorer.exe
+firefox.exe
+idea64.exe
+msedge.exe
+opera.exe
+powershell.exe
+proc_wolf_background.py
+procwolf.exe
+procwolfcli.exe
+procwolfservice.exe
+pycharm64.exe
+python.exe
+snippingtool.exe
+taskmgr.exe
+visual studio.exe
+vivaldi.exe
+windowsterminal.exe
+---SIGNATURE---IfI8e4Luhb+qdtEeoWwHnnIY+OyjVwddST48tOcJDxY=

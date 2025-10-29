@@ -4,6 +4,8 @@ proc-wolf: Advanced Process Monitor and Security Tool
 ----------------------------------------------------
 Monitors, detects, and handles suspicious processes using a multi-layered
 verification approach and escalating response system.
+
+Version 3.1.0 - FIXED VERSION with comprehensive Windows process recognition
 """
 
 import os
@@ -23,6 +25,34 @@ import re
 import threading
 import shutil
 import json
+
+# Import comprehensive Windows process whitelist
+try:
+    from windows_processes import (
+        is_system_process,
+        is_safe_path,
+        get_all_whitelisted_processes,
+        WINDOWS_CORE_PROCESSES,
+        WINDOWS_DEFENDER_PROCESSES,
+        LEGITIMATE_SOFTWARE
+    )
+except ImportError:
+    # Fallback if module not found - include critical processes inline
+    WINDOWS_CORE_PROCESSES = ['System', 'Registry', 'smss.exe', 'csrss.exe', 'services.exe', 
+                              'lsass.exe', 'svchost.exe', 'explorer.exe', 'dwm.exe']
+    WINDOWS_DEFENDER_PROCESSES = ['MsMpEng.exe', 'NisSrv.exe', 'MpDefenderCoreService.exe']
+    LEGITIMATE_SOFTWARE = ['vivaldi.exe', 'chrome.exe', 'firefox.exe', 'ProcWolf.exe', 
+                          'ProcWolfService.exe', 'Dropbox.exe', 'ProtonVPN.exe']
+    
+    def is_system_process(name):
+        return name.lower() in [p.lower() for p in WINDOWS_CORE_PROCESSES + WINDOWS_DEFENDER_PROCESSES + LEGITIMATE_SOFTWARE]
+    
+    def is_safe_path(path):
+        safe = ['C:\\Windows\\', 'C:\\Program Files\\', 'C:\\Program Files (x86)\\']
+        return any(path.lower().startswith(s.lower()) for s in safe) if path else False
+    
+    def get_all_whitelisted_processes():
+        return WINDOWS_CORE_PROCESSES + WINDOWS_DEFENDER_PROCESSES + LEGITIMATE_SOFTWARE
 
 # Try to import winreg
 try:
@@ -70,7 +100,7 @@ APP_DATA_DIR = os.path.join(os.environ.get('PROGRAMDATA', r'C:\ProgramData'), 'p
 os.makedirs(APP_DATA_DIR, exist_ok=True)
 
 # Global Constants
-VERSION = "3.0.0"
+VERSION = "3.1.0"  # FIXED VERSION - Comprehensive Windows process recognition
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "proc-wolf.config")
 DB_FILE = os.path.join(APP_DATA_DIR, "proc-wolf.db")
 QUARANTINE_DIR = os.path.join(APP_DATA_DIR, "quarantine")
@@ -114,8 +144,21 @@ class Database:
         try:
             self.conn = sqlite3.connect(self.db_path, timeout=30.0)
             cursor = self.conn.cursor()
+            
+            # Check if we need to migrate/update the schema
+            try:
+                cursor.execute("SELECT times_seen FROM process_history LIMIT 1")
+            except sqlite3.OperationalError:
+                # Column doesn't exist, need to add it
+                logging.info("Migrating database schema - adding times_seen column")
+                try:
+                    cursor.execute("ALTER TABLE process_history ADD COLUMN times_seen INTEGER DEFAULT 1")
+                    logging.info("Successfully added times_seen column")
+                except sqlite3.OperationalError:
+                    # Table might not exist, create it fresh
+                    pass
 
-            # Create process history table
+            # Create process history table (with IF NOT EXISTS, so safe to run)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS process_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -190,17 +233,18 @@ class Database:
                 )
             """)
 
-            # Add default threat patterns if table is empty
+            # Add default threat patterns if table is empty (but be MUCH more conservative)
             cursor.execute("SELECT COUNT(*) FROM threat_patterns")
             if cursor.fetchone()[0] == 0:
+                # Only add patterns for ACTUALLY suspicious things
                 default_patterns = [
-                    ('name', 'svchost.exe', 3, 'Suspicious if not in System32'),
-                    ('name', 'csrss.exe', 4, 'Critical system process - suspicious if duplicated'),
-                    ('path', 'C:\\Users\\.*\\AppData\\Local\\Temp\\.*', 2, 'Process running from temp folder'),
-                    ('path', '.*\\Downloads\\.*', 2, 'Process running from downloads folder'),
                     ('name', '.*cryptor.*', 4, 'Possible ransomware'),
+                    ('name', '.*ransom.*', 4, 'Possible ransomware'),
                     ('name', '.*miner.*', 3, 'Possible cryptominer'),
-                    ('name', '.*\\d{5,}\\.exe', 2, 'Randomly named executable'),
+                    ('name', '.*keylog.*', 4, 'Possible keylogger'),
+                    ('name', '.*trojan.*', 4, 'Possible trojan'),
+                    ('name', '.*\\d{8,}\\.exe$', 2, 'Suspiciously random named executable'),
+                    ('path', '.*\\$Recycle\\.Bin\\.*', 3, 'Process running from recycle bin'),
                 ]
                 cursor.executemany(
                     "INSERT INTO threat_patterns (pattern_type, pattern, severity, description) VALUES (?, ?, ?, ?)",
@@ -208,7 +252,7 @@ class Database:
                 )
 
             self.conn.commit()
-            logging.info("Database initialized successfully")
+            logging.info("Database initialized successfully with proper schema")
             
         except sqlite3.Error as e:
             logging.error(f"Database initialization failed: {e}")
@@ -218,10 +262,10 @@ class Database:
         """Add or update process in the database"""
         cursor = self.conn.cursor()
         try:
-            # Check if process exists
+            # Check if process exists - FIXED: added proper error handling
             cursor.execute(
                 "SELECT id, times_seen FROM process_history WHERE pid = ? AND name = ? AND path = ?",
-                (process_info['pid'], process_info['name'], process_info['path'])
+                (process_info.get('pid', 0), process_info.get('name', ''), process_info.get('path', ''))
             )
             result = cursor.fetchone()
             
@@ -232,26 +276,26 @@ class Database:
                     SET last_seen = CURRENT_TIMESTAMP, times_seen = times_seen + 1,
                         threat_level = ?, trusted = ?
                     WHERE id = ?
-                """, (process_info['threat_level'], process_info['trusted'], result[0]))
+                """, (process_info.get('threat_level', 0), process_info.get('trusted', False), result[0]))
                 process_id = result[0]
             else:
-                # Insert new process
+                # Insert new process with all required fields
                 cursor.execute("""
                     INSERT INTO process_history 
                     (pid, name, path, command_line, hash, parent_pid, username, 
                      create_time, threat_level, trusted)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    process_info['pid'],
-                    process_info['name'],
-                    process_info['path'],
+                    process_info.get('pid', 0),
+                    process_info.get('name', ''),
+                    process_info.get('path', ''),
                     process_info.get('command_line', ''),
                     process_info.get('hash', ''),
                     process_info.get('parent_pid', 0),
                     process_info.get('username', ''),
                     process_info.get('create_time', 0),
-                    process_info['threat_level'],
-                    process_info['trusted']
+                    process_info.get('threat_level', 0),
+                    process_info.get('trusted', False)
                 ))
                 process_id = cursor.lastrowid
                 
@@ -259,7 +303,8 @@ class Database:
             return process_id
             
         except sqlite3.Error as e:
-            logging.error(f"Database error: {e}")
+            logging.error(f"Database error in add_or_update_process: {e}")
+            # Don't crash the service for database errors
             return None
 
     def log_activity(self, process_id, process_name, pid, action, threat_level, details=""):
@@ -343,25 +388,34 @@ class Database:
         return cursor.fetchall()
 
     def is_whitelisted(self, process_name, process_path=None, process_hash=None):
-        """Check if process is whitelisted"""
+        """Check if process is whitelisted - no pid column in whitelist table!"""
+        if not process_name:
+            return False
+            
         cursor = self.conn.cursor()
         
-        # Check by name
-        cursor.execute("SELECT 1 FROM whitelist WHERE type = 'name' AND value = ?", (process_name,))
-        if cursor.fetchone():
-            return True
-            
-        # Check by path
-        if process_path:
-            cursor.execute("SELECT 1 FROM whitelist WHERE type = 'path' AND value = ?", (process_path,))
+        try:
+            # Check by name
+            cursor.execute("SELECT 1 FROM whitelist WHERE type = 'name' AND value = ?", (process_name,))
             if cursor.fetchone():
                 return True
                 
-        # Check by hash
-        if process_hash:
-            cursor.execute("SELECT 1 FROM whitelist WHERE type = 'hash' AND value = ?", (process_hash,))
-            if cursor.fetchone():
-                return True
+            # Check by path
+            if process_path:
+                cursor.execute("SELECT 1 FROM whitelist WHERE type = 'path' AND value = ?", (process_path,))
+                if cursor.fetchone():
+                    return True
+                    
+            # Check by hash
+            if process_hash:
+                cursor.execute("SELECT 1 FROM whitelist WHERE type = 'hash' AND value = ?", (process_hash,))
+                if cursor.fetchone():
+                    return True
+                    
+        except sqlite3.Error as e:
+            logging.debug(f"Whitelist check error: {e}")
+            # On error, default to not whitelisted for safety
+            pass
                 
         return False
 
@@ -397,71 +451,86 @@ class Database:
 
 
 # --- Whitelist Management ---
-CRITICAL_WHITELIST = [
+# Get comprehensive list from windows_processes module or use fallback
+try:
+    COMPREHENSIVE_WHITELIST = get_all_whitelisted_processes()
+except:
+    # Emergency fallback list
+    COMPREHENSIVE_WHITELIST = [
+        'System', 'Registry', 'smss.exe', 'csrss.exe', 'wininit.exe',
+        'services.exe', 'lsass.exe', 'lsaiso.exe', 'winlogon.exe', 
+        'explorer.exe', 'svchost.exe', 'taskmgr.exe', 'taskhost.exe',
+        'taskhostw.exe', 'dwm.exe', 'MemCompression', 'spoolsv.exe',
+        'wlanext.exe', 'WUDFHost.exe', 'MsMpEng.exe', 'NisSrv.exe',
+        'vivaldi.exe', 'chrome.exe', 'firefox.exe', 'Dropbox.exe',
+        'ProtonVPN.exe', 'ProtonVPNService.exe', 'ProcWolf.exe',
+        'ProcWolfService.exe', 'ProcWolfCLI.exe', 'OneDrive.exe',
+        'igfxEM.exe', 'ctfmon.exe', 'sihost.exe', 'dasHost.exe',
+        'LITSSvc.exe', 'ibmpmsvc.exe', 'PowerMgr.exe'
+    ]
+
+# Critical processes that should NEVER be touched
+CRITICAL_NEVER_TOUCH = [
     'System',
-    'Registry',
+    'System Idle Process',
+    'Registry', 
     'smss.exe',
     'csrss.exe',
-    'wininit.exe',
     'services.exe',
     'lsass.exe',
+    'lsaiso.exe',
     'winlogon.exe',
-    'explorer.exe',
     'svchost.exe',
-    'taskmgr.exe',
-    'taskhost.exe',
+    'MemCompression',
     'dwm.exe',
-]
-
-# Common safe applications that shouldn't be flagged
-SAFE_APPLICATIONS = [
-    # Browsers
-    'chrome.exe',
-    'firefox.exe',
-    'msedge.exe',
-    'brave.exe',
-    'vivaldi.exe',
-    'opera.exe',
-    'iexplore.exe',
-    # Development
-    'code.exe',
-    'devenv.exe',
-    'python.exe',
-    'node.exe',
-    'git.exe',
-    # Communication
-    'discord.exe',
-    'slack.exe',
-    'teams.exe',
-    'zoom.exe',
-    'skype.exe',
-    # Media
-    'spotify.exe',
-    'vlc.exe',
-    'obs64.exe',
-    'obs.exe',
-    # System tools
-    'powershell.exe',
-    'cmd.exe',
-    'conhost.exe',
-    'terminal.exe',
-    'wt.exe',
+    'explorer.exe',
 ]
 
 def is_whitelisted(process_name, process_path=None, db=None):
-    """Check if a process is whitelisted"""
+    """Check if a process is whitelisted - MUCH more conservative now"""
     if not process_name:
         return False
     
-    # Check critical system processes
-    if process_name.lower() in [p.lower() for p in CRITICAL_WHITELIST]:
-        # For critical system processes, verify they're in the correct location
-        if process_path and 'System32' in process_path:
-            return True
+    name_lower = process_name.lower()
     
-    # Check safe applications list
-    if process_name.lower() in [p.lower() for p in SAFE_APPLICATIONS]:
+    # ALWAYS whitelist proc-wolf itself!
+    if 'procwolf' in name_lower or 'proc-wolf' in name_lower or 'proc_wolf' in name_lower:
+        logging.debug(f"Process {process_name} is proc-wolf itself - whitelisted")
         return True
+    
+    # Check if it's a Windows system process
+    try:
+        if is_system_process(process_name):
+            logging.debug(f"Process {process_name} is a system process - whitelisted")
+            return True
+    except:
+        pass
+    
+    # Check comprehensive whitelist
+    if name_lower in [p.lower() for p in COMPREHENSIVE_WHITELIST]:
+        logging.debug(f"Process {process_name} in comprehensive whitelist")
+        return True
+    
+    # Check if it's in a safe path
+    if process_path:
+        try:
+            if is_safe_path(process_path):
+                logging.debug(f"Process {process_name} in safe path {process_path} - whitelisted")
+                return True
+        except:
+            pass
+        
+        # Special checks for specific paths
+        safe_paths = [
+            'C:\\Windows\\',
+            'C:\\Program Files\\',
+            'C:\\Program Files (x86)\\',
+            'C:\\ProgramData\\Microsoft\\'
+        ]
+        for safe_path in safe_paths:
+            if process_path.lower().startswith(safe_path.lower()):
+                logging.debug(f"Process {process_name} in safe path - whitelisted")
+                return True
     
     # Check database whitelist if available
     if db:
@@ -469,6 +538,10 @@ def is_whitelisted(process_name, process_path=None, db=None):
             return db.is_whitelisted(process_name, process_path)
         except:
             pass
+    
+    # Special cases - processes with no name or special names
+    if not process_name or process_name == '' or process_name == 'System Idle Process':
+        return True
     
     return False
 
@@ -549,57 +622,67 @@ def check_digital_signature(process_path):
         return False
 
 def is_suspicious_name(process_name):
-    """Check if process name matches suspicious patterns"""
+    """Check if process name matches suspicious patterns - CONSERVATIVE"""
     if not process_name:
         return False
     
-    suspicious_patterns = [
+    # First check if it's a known legitimate process
+    try:
+        if is_system_process(process_name):
+            return False  # Known legitimate
+    except:
+        pass
+    
+    # Only flag REALLY suspicious patterns
+    highly_suspicious = [
         r'.*cryptor.*',
-        r'.*miner.*',
         r'.*ransom.*',
-        r'.*stealer.*',
-        r'.*keylog.*',
-        r'.*backdoor.*',
         r'.*trojan.*',
+        r'.*backdoor.*',
+        r'.*keylog.*',
+        r'.*stealer.*',
         r'.*virus.*',
         r'.*malware.*',
-        r'.*\d{5,}\.exe$',  # Randomly named executables
-        r'^[a-z]{6,8}\.exe$',  # Random lowercase names
+        r'.*rootkit.*',
+        r'[a-z]{16,}\.exe$',  # Very long random lowercase names (16+ chars)
+        r'.*\d{10,}\.exe$',    # Very long random numbers (10+ digits)
     ]
     
     name_lower = process_name.lower()
-    for pattern in suspicious_patterns:
+    for pattern in highly_suspicious:
         if re.match(pattern, name_lower):
+            logging.warning(f"Process {process_name} matches suspicious pattern: {pattern}")
             return True
     
-    # Check for system process impersonation
-    system_processes = ['svchost.exe', 'csrss.exe', 'winlogon.exe', 'services.exe']
-    for sys_proc in system_processes:
-        # Suspicious if similar but not exact match
-        if name_lower != sys_proc and name_lower.replace(' ', '') == sys_proc.replace('.', ''):
-            return True
-    
-    return False
+    return False  # Default to not suspicious
 
 def is_suspicious_location(process_path):
-    """Check if process is running from a suspicious location"""
+    """Check if process is running from a suspicious location - CONSERVATIVE"""
     if not process_path:
         return False
     
-    suspicious_paths = [
-        r'.*\\AppData\\Local\\Temp\\.*',
-        r'.*\\Downloads\\.*',
-        r'.*\\Desktop\\.*',
-        r'.*\\$Recycle\.Bin\\.*',
-        r'.*\\ProgramData\\.*\\.*\.exe$',
-        r'.*\\Users\\Public\\.*',
+    # First check if it's a safe path
+    try:
+        if is_safe_path(process_path):
+            return False  # Known safe location
+    except:
+        pass
+    
+    # Only flag REALLY suspicious locations
+    highly_suspicious_paths = [
+        r'.*\\$Recycle\.Bin\\.*',           # Recycle bin
+        r'.*\\Users\\Public\\Downloads\\.*', # Public downloads (not user's downloads)
+        r'.*\\Users\\Public\\Documents\\.*', # Public documents
+        r'.*\\Windows\\Temp\\.*\.exe$',      # Windows temp with .exe
+        r'.*\\AppData\\Local\\Temp\\.*\d{6,}.*\.exe$',  # Temp with random numbers
     ]
     
-    for pattern in suspicious_paths:
+    for pattern in highly_suspicious_paths:
         if re.match(pattern, process_path, re.IGNORECASE):
+            logging.warning(f"Process at suspicious location: {process_path}")
             return True
     
-    return False
+    return False  # Default to not suspicious
 
 def has_suspicious_behavior(pid, proc_info=None):
     """Check for suspicious process behavior"""
@@ -823,87 +906,141 @@ def confirm_nuke(process_name, pid):
         return False
 
 def evaluate_threat_level(process_info):
-    """Evaluate the threat level of a process"""
+    """Evaluate the threat level of a process - VERY CONSERVATIVE to avoid false positives"""
     threat_score = 0
     
-    # Check if whitelisted (trusted)
+    # Get process details
+    process_name = process_info.get('name', '')
+    process_path = process_info.get('path', '')
+    
+    # ALWAYS TRUST whitelisted processes
     if process_info.get('trusted', False):
         return 0  # TRUSTED
     
-    # Check if it's a known safe application (double-check)
-    process_name_lower = process_info['name'].lower() if process_info.get('name') else ''
-    if process_name_lower in [app.lower() for app in SAFE_APPLICATIONS]:
-        return 0  # TRUSTED - safe application
+    # CRITICAL: Never flag proc-wolf itself!
+    if process_name and ('procwolf' in process_name.lower() or 
+                        'proc-wolf' in process_name.lower() or 
+                        'proc_wolf' in process_name.lower()):
+        return 0  # TRUSTED - it's us!
     
-    # Check if running from Program Files (usually legitimate)
-    process_path = process_info.get('path', '')
+    # Check if it's a known system process
+    try:
+        if is_system_process(process_name):
+            return 0  # TRUSTED - system process
+    except:
+        pass
+    
+    # Special handling for critical Windows processes
+    critical_processes = ['System Idle Process', 'System', 'Registry', 'MemCompression',
+                         'services.exe', 'lsass.exe', 'csrss.exe', 'smss.exe']
+    if process_name in critical_processes or process_name.lower() in [p.lower() for p in critical_processes]:
+        return 0  # TRUSTED - never touch these!
+    
+    # Check if running from safe location
     if process_path:
-        if 'Program Files' in process_path or 'Program Files (x86)' in process_path:
-            # Reduce threat score for Program Files applications
-            threat_score -= 1
+        try:
+            if is_safe_path(process_path):
+                # Process in safe location - reduce threat significantly
+                threat_score -= 2
+        except:
+            pass
+        
+        # Additional safe path checks
+        if ('C:\\Windows\\' in process_path or 
+            'C:\\Program Files' in process_path or
+            'C:\\ProgramData\\Microsoft' in process_path):
+            threat_score -= 2
     
-    # Check digital signature
+    # Only add threat for REALLY suspicious names
+    really_suspicious = ['cryptor', 'ransom', 'trojan', 'keylog', 'backdoor', 'malware']
+    name_lower = process_name.lower() if process_name else ''
+    for susp in really_suspicious:
+        if susp in name_lower:
+            threat_score += 4  # These are actually suspicious
+            break
+    
+    # Check if unsigned (but many legitimate apps are unsigned, so low weight)
     if not process_info.get('signed', False):
-        threat_score += 2
+        # Only add threat if also not in safe location
+        if process_path and not is_safe_path(process_path):
+            threat_score += 1  # Reduced from 2
     
-    # Check process name
-    if is_suspicious_name(process_info['name']):
-        threat_score += 3
+    # Check for VERY suspicious locations only
+    very_suspicious_paths = [
+        '\\AppData\\Local\\Temp\\',
+        '\\$Recycle.Bin\\',
+        '\\Users\\Public\\Downloads\\',  # Public downloads more suspicious than user downloads
+    ]
+    if process_path:
+        for susp_path in very_suspicious_paths:
+            if susp_path in process_path:
+                threat_score += 2
+                break
     
-    # Check process location
-    if is_suspicious_location(process_info.get('path', '')):
-        threat_score += 2
-    
-    # Check for suspicious behavior
+    # Check for suspicious behavior (but be conservative)
     if has_suspicious_behavior(process_info['pid'], process_info):
-        threat_score += 3
+        # Only add if we already have some suspicion
+        if threat_score > 0:
+            threat_score += 1  # Reduced from 3
     
-    # Check parent process
+    # Check parent process (but many legitimate things spawn from cmd/powershell)
     parent_name = process_info.get('parent_name', '')
-    if parent_name and parent_name.lower() in ['cmd.exe', 'powershell.exe', 'wscript.exe', 'cscript.exe']:
-        # Only add threat if it's not a development tool
-        if process_name_lower not in ['python.exe', 'node.exe', 'java.exe', 'git.exe']:
-            threat_score += 1
-    
-    # Check if process is hidden
-    if not is_interactive_process(process_info['pid']):
+    if parent_name and parent_name.lower() in ['wscript.exe', 'cscript.exe']:
+        # Scripts are more suspicious than cmd/powershell
         threat_score += 1
     
     # Normalize threat score (can't be negative)
     threat_score = max(0, threat_score)
     
-    # Determine threat level based on score
+    # Be VERY conservative with threat levels
     if threat_score == 0:
         return 0  # TRUSTED
-    elif threat_score <= 2:
+    elif threat_score <= 1:
         return 1  # LOW
-    elif threat_score <= 4:
-        return 2  # MEDIUM
-    elif threat_score <= 6:
-        return 3  # HIGH
+    elif threat_score <= 3:
+        return 2  # MEDIUM - but will only warn, not kill
+    elif threat_score <= 5:
+        return 3  # HIGH - needs multiple warnings before action
     else:
-        return 4  # CRITICAL
+        return 4  # CRITICAL - but still requires confirmation
 
 def get_action_level(threat_level, warnings_count):
-    """Determine action based on threat level and warning count"""
+    """Determine action based on threat level and warning count - VERY CONSERVATIVE"""
+    # Be EXTREMELY conservative about taking action
+    
     if threat_level == 0:  # TRUSTED
-        return 0  # MONITOR
+        return 0  # MONITOR - never act on trusted processes
+        
     elif threat_level == 1:  # LOW
-        return 0 if warnings_count < 3 else 1  # MONITOR -> WARN
-    elif threat_level == 2:  # MEDIUM
-        if warnings_count < 2:
-            return 1  # WARN
-        elif warnings_count < 4:
-            return 2  # KILL
+        # Low threat = just monitor, never act
+        return 0  # MONITOR
+        
+    elif threat_level == 2:  # MEDIUM  
+        # Medium threat = warn a LOT before any action
+        if warnings_count < 10:
+            return 0  # MONITOR for first 10 warnings
+        elif warnings_count < 20:
+            return 1  # WARN after 10 warnings
         else:
-            return 3  # QUARANTINE
+            return 2  # KILL only after 20 warnings
+            
     elif threat_level == 3:  # HIGH
-        if warnings_count < 1:
-            return 2  # KILL
+        # High threat = still be very careful
+        if warnings_count < 5:
+            return 1  # WARN for first 5
+        elif warnings_count < 15:
+            return 2  # KILL after 5 warnings
         else:
+            return 3  # QUARANTINE only after 15 warnings
+            
+    else:  # CRITICAL (threat_level >= 4)
+        # Even critical threats need confirmation
+        if warnings_count < 3:
+            return 2  # KILL after some observation
+        elif warnings_count < 10:
             return 3  # QUARANTINE
-    else:  # CRITICAL
-        return 4  # NUKE
+        else:
+            return 4  # NUKE only after significant observation
 
 def kill_process(pid, db=None):
     """Kill a process by PID"""
@@ -1161,35 +1298,44 @@ def init_database():
     try:
         db = Database(DB_FILE)
         
-        # Add critical processes to whitelist
-        critical_added = 0
-        for proc in CRITICAL_WHITELIST:
-            if db.add_to_whitelist('name', proc, "Critical system process"):
-                critical_added += 1
+        # Add comprehensive Windows processes to whitelist
+        try:
+            all_system_processes = get_all_whitelisted_processes()
+        except:
+            # Use fallback list if module not available
+            all_system_processes = COMPREHENSIVE_WHITELIST
         
-        # Add safe applications to whitelist
-        safe_added = 0
-        for app in SAFE_APPLICATIONS:
-            if db.add_to_whitelist('name', app, "Safe application"):
-                safe_added += 1
+        added_count = 0
+        logging.info(f"Adding {len(all_system_processes)} system processes to whitelist...")
         
-        # Add some common safe paths
+        for proc in all_system_processes:
+            if db.add_to_whitelist('name', proc, "System/Legitimate process"):
+                added_count += 1
+        
+        # CRITICAL: Add proc-wolf itself!
+        proc_wolf_variants = [
+            'ProcWolf.exe', 'ProcWolfService.exe', 'ProcWolfCLI.exe',
+            'proc_wolf.exe', 'proc-wolf.exe', 'procwolf.exe'
+        ]
+        for variant in proc_wolf_variants:
+            db.add_to_whitelist('name', variant, "Proc-Wolf self-protection")
+        
+        # Add safe paths
         safe_paths = [
+            "C:\\Windows\\",
             "C:\\Windows\\System32\\",
-            "C:\\Windows\\explorer.exe",
+            "C:\\Windows\\SysWOW64\\",
             "C:\\Program Files\\",
             "C:\\Program Files (x86)\\",
+            "C:\\ProgramData\\Microsoft\\",
+            "C:\\ProgramData\\proc-wolf\\",  # Our own directory!
         ]
-        paths_added = 0
         for path in safe_paths:
-            if db.add_to_whitelist('path', path, "System/Program path"):
-                paths_added += 1
+            db.add_to_whitelist('path', path, "Safe system/program path")
         
-        logging.info(f"Database initialized with whitelist:")
-        logging.info(f"  - {critical_added}/{len(CRITICAL_WHITELIST)} critical system processes")
-        logging.info(f"  - {safe_added}/{len(SAFE_APPLICATIONS)} safe applications")
-        logging.info(f"  - {paths_added}/{len(safe_paths)} safe paths")
-        logging.info(f"  - Vivaldi browser: {'WHITELISTED' if 'vivaldi.exe' in [x.lower() for x in SAFE_APPLICATIONS] else 'NOT WHITELISTED'}")
+        logging.info(f"Database initialized with {added_count} whitelisted processes")
+        logging.info("Critical processes whitelisted: System Idle Process, MemCompression, etc.")
+        logging.info("Proc-Wolf itself is whitelisted for self-protection")
         
         return db
     
@@ -1212,6 +1358,7 @@ def monitor_processes(db, stop_event=None):
     
     # Track previous PIDs to detect process terminations
     previous_pids = set()
+    current_pids = set()  # Initialize before loop to avoid UnboundLocalError
     
     # Cooldown tracking to prevent too-frequent actions
     process_cooldowns = {}
@@ -1241,6 +1388,14 @@ def monitor_processes(db, stop_event=None):
                     if process_info:
                         current_pids.add(proc.pid)
                         current_processes[proc.pid] = process_info
+                        
+                        # Skip processes with no name or special system processes
+                        if not process_info.get('name') or process_info['name'] == '':
+                            continue
+                        
+                        # Skip System Idle Process and System (PIDs 0 and 4)
+                        if proc.pid == 0 or proc.pid == 4:
+                            continue
                         
                         # Skip if whitelisted
                         if is_whitelisted(process_info['name'], process_info.get('path'), db):
@@ -1327,8 +1482,15 @@ def monitor_processes(db, stop_event=None):
                                 # Don't crash the entire service for action failures
                                 continue
                         
-                        # Add to database even if low threat
-                        db.add_or_update_process(process_info)
+                        # Add to database even if low threat (for tracking)
+                        try:
+                            db_id = db.add_or_update_process(process_info)
+                            if db_id:
+                                process_info['db_id'] = db_id
+                        except Exception as e:
+                            logging.debug(f"Could not update database for {process_name}: {e}")
+                            # Continue monitoring even if database has issues
+                            pass
                     
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
