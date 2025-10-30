@@ -1,0 +1,6 @@
+# Run as Administrator
+# Increase service timeout to 60 seconds (60000 ms)
+reg add "HKLM\SYSTEM\CurrentControlSet\Control" /v ServicesPipeTimeout /t REG_DWORD /d 60000 /f
+
+# Restart computer for it to take effect
+shutdown /r /t 0

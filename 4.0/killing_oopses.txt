@@ -1,0 +1,25 @@
+# Run as Administrator
+
+# 1. See all running instances
+tasklist | findstr -i "procwolf"
+
+# 2. Nuclear option - kill ALL proc-wolf instances
+taskkill /F /IM "ProcWolfService.exe"
+taskkill /F /IM "ProcWolf.exe" 
+taskkill /F /IM "proc_wolf.exe"
+
+# 3. Clean stop the service (if installed)
+net stop ProcWolfService
+sc delete ProcWolfService
+
+# 4. Verify they're gone
+tasklist | findstr -i "procwolf"
+
+# Nuclear cleanup - run as Administrator
+taskkill /F /IM "ProcWolfService.exe"
+taskkill /F /IM "proc_wolf.exe"
+
+# Verify they're dead
+tasklist | findstr -i "wolf"
+```
+

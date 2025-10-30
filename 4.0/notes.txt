@@ -1,0 +1,50 @@
+successful test build should give:
+```
+All executables built successfully!
+Files are available in the ./dist directory
+===================================
+PS C:\proc_wolf\4.0>
+```
+
+then run:
+
+```
+PS C:\proc_wolf\4.0> cd dist
+PS C:\proc_wolf\4.0\dist> .\ProcWolfService.exe debug
+```
+
+should see:
+
+```
+Debugging service ProcWolfService - press Ctrl+C to stop.
+Info 0x40001002 - The ProcWolfService service has started.
+```
+
+after a few mins [ctrl]+[c]:
+
+```
+Stopping debug service.
+PS C:\proc_wolf\4.0>
+```
+
+then, upon c:\program_data\proc_wolf\proc-wolf-service.log` inspection:
+
+```
+2025-10-30 01:27:07,454 - INFO - Service reported RUNNING status to Windows SCM
+2025-10-30 01:27:07,454 - INFO - Starting monitor thread...
+2025-10-30 01:27:07,454 - INFO - Initializing database...
+2025-10-30 01:27:07,454 - INFO - Database initialized successfully with proper schema
+2025-10-30 01:27:07,454 - INFO - Adding 216 system processes to whitelist...
+2025-10-30 01:27:07,899 - INFO - Database initialized with 216 whitelisted processes
+2025-10-30 01:27:07,899 - INFO - Critical processes whitelisted: System Idle Process, MemCompression, etc.
+2025-10-30 01:27:07,899 - INFO - Proc-Wolf itself is whitelisted for self-protection
+2025-10-30 01:27:07,899 - INFO - Database initialized successfully.
+2025-10-30 01:27:07,899 - INFO - Starting proc_wolf.monitor_processes...
+2025-10-30 01:27:07,899 - INFO - Starting process monitoring loop (v3.1.0)
+2025-10-30 01:27:07,899 - INFO - Check interval: 5 seconds
+2025-10-30 01:27:07,899 - INFO - Stop event type: PyHANDLE
+2025-10-30 01:27:07,899 - INFO - Monitor loop iteration 1, tracking 0 processes
+2025-10-30 01:31:02,605 - INFO - Monitor status - Checked: 196, Whitelisted: 190, Active PIDs: 196
+2025-10-30 01:31:02,814 - INFO - Service stop signal received.
+```
+
