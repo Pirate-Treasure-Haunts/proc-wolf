@@ -1,132 +1,230 @@
 [README.md]
-in the same folder as your .exe or on your GitHub page or anywhere you're sharing the tool.
 
-# 🐺 Proc-Wolf: Rogue Process & Service Removal Companion
-**Proc-Wolf** is a lightweight background daemon that watches for suspicious or unwanted processes and takes them out. But sometimes, you might need to go full ghostbuster mode when a stubborn service or malware leftover refuses to die. This guide walks you through both.
+# 🐺 Proc-Wolf - Advanced Windows Process Monitor
 
----
+<p align="center">
+  <a href="https://github.com/whisprer/proc-wolf/releases">
+    <img src="https://img.shields.io/github/v/release/whisprer/proc-wolf?color=4CAF50&label=release" alt="Release Version">
+  </a>
+  <a href="https://github.com/whisprer/proc-wolf/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/whisprer/proc-wolf/lint-and-plot.yml?label=build" alt="Build Status">
+  </a>
+</p>
 
-### Quickstart: Using `proc_wolf.exe`
-1. Double-click `proc_wolf.exe` to start watching silently in the background.
-2. It will scan every few seconds and attempt to kill known bad processes listed in its internal target list.
-3. Log file is written to:
+![Commits](https://img.shields.io/github/commit-activity/m/whisprer/proc-wolf?label=commits)
+![Last Commit](https://img.shields.io/github/last-commit/whisprer/proc-wolf)
+![Issues](https://img.shields.io/github/issues/whisprer/proc-wolf)
+[![Version](https://img.shields.io/badge/version-3.1.1-blue.svg)](https://github.com/yourusername/proc-wolf)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey.svg)](https://www.microsoft.com/windows)
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-`C:\Users<YourUsername>\AppData\Roaming\proc_wolf.log`
+<p align="center">
+  <img src="proc-wolf-banner.png" width="850" alt="Proc-Wolf Banner">
+</p>
 
-You can verify it's running via Task Manager (`proc_wolf.exe`) or by checking the log file.
+A sophisticated Windows process monitoring and threat detection system that guards your system against malicious processes while respecting legitimate software.
 
----
+## Features
 
-### To Stop Proc-Wolf
-- Open Task Manager → Right-click `proc_wolf.exe` → **End Task**
-- Or use PowerShell:
-powershell
-`Stop-Process -Name proc_wolf -Force`
-If scheduled via Task Scheduler, go to Task Scheduler → Task Library and disable or delete the task.
+### Core Capabilities
+- **Real-time Process Monitoring**: Continuously monitors all running processes
+- **Multi-layered Threat Detection**: Uses behavioral analysis, signature verification, and heuristic patterns
+- **Conservative Action System**: Graduated response system (Monitor → Warn → Kill → Quarantine → Nuke)
+- **Comprehensive Windows Recognition**: Whitelists 216+ legitimate Windows processes and services
+- **Self-Protection**: Won't attack itself or critical system components
+- **Automatic Quarantine**: Isolates suspicious executables safely
 
-Manual Removal of Rogue Services & Processes
-Sometimes, a process or service just wont go away — even after taskkill or sc delete. If that happens, follow the steps below.
+### Deployment Options
+- **Windows Service**: Runs silently in the background with automatic startup
+- **System Tray Application**: User-friendly interface with notifications
+- **Command Line Interface**: Direct control for power users
+- **Debug Mode**: For testing and troubleshooting
 
-## Phase 1: Identify the Threat
-Open Task Manager or Process Explorer
+## Quick Start
 
-Look for:
-- Processes with missing or weird descriptions
-- Names like xxxxxService_abc123
-- Stuff using high CPU/RAM unexpectedly
-- Suspicious command-line entries
+### Prerequisites
+- Windows 10/11 (64-bit)
+- Administrator privileges
+- Python 3.8+ (for building from source)
 
-Useful PowerShell:
-powershell
-`Get-Process | Sort-Object CPU -Descending | Select-Object -First 20 Name, Id, CPU, Description`
-`Get-CimInstance Win32_Process | Select-Object Name, CommandLine`
+### Installation
 
-## Phase 2: Kill the Process
-In Admin Command Prompt:
+#### Option 1: Pre-built Release (Recommended)
+1. Download the latest release from [Releases](https://github.com/yourusername/proc-wolf/releases)
+2. Extract to your preferred location
+3. Right-click `install.bat` and select "Run as administrator"
+4. The service will start automatically
 
-cmd
-`taskkill /f /pid [PID]`
-Or get the service PID first:
+#### Option 2: Build from Source
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/proc-wolf.git
+cd proc-wolf
 
-cmd
-`sc queryex xxxxxService_name`
+# Install dependencies
+pip install -r requirements.txt
 
-## Phase 3: Stop & Delete the Service
-Still in Admin CMD:
+# Build executables
+python build_exe.py
 
-cmd
-`sc stop xxxxxService_name`
-`sc delete xxxxxService_name`
-If that doesn’t work due to permissions...
-
-## Phase 4: Use Sysinternals Suite (Autoruns)
-Download: https://learn.microsoft.com/en-us/sysinternals/downloads/sysinternals-suite
-
-Run Autoruns.exe as Admin
-Switch to the Services tab
-[Ctrl+F] the rogue service
-[Right-click] → [Delete] or uncheck to disable
-
-## Phase 5: Clean Registry (Optional)
-Run regedit.exe as Admin
-
-Navigate to:
-
-reg
-`HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\`
-Find the exact service key (e.g., OneSyncSvc_3c981)
-
-[Right-click] → [Delete]
-
-### Final Cleanup
-Reboot
-
-Check:
-`services.msc`
-[Task Manager] → [Services]
-Autoruns again
-Confirm it's really gone
-
-# Plan B: Scheduled Kill at Boot
-If all else fails:
-
-- Use Recovery Console (Shift + Restart)
-- Open Command Prompt
-- Delete from the offline registry or disable the task
-- Bonus Tool: Process Explorer
-[A superpowered Task Manager:]
-
-Download: https://docs.microsoft.com/en-us/sysinternals/downloads/process-explorer
-
-Run as Admin
-
-See:
-- Full process trees
-- DLLs and handles
-- Network activity
-- Parent processes
-
-### Tips for Detection
-Look out for:
-- Random suffix services (Service_9f21b)
-- Services with no descriptions
-- Processes that respawn after kill
-- Unexpected CPU/disk/network use
-
-🐺 Want to Customize Proc-Wolf?
-Open the proc_wolf.py file and edit:
-
-```python
-TARGET_PROCESSES = {
-    "badprocess.exe": {"kills": 0, "severity": 0},
-    "evilscript.py": {"kills": 0, "severity": 0},
-    "worm.bat": {"kills": 0, "severity": 0}
-}
+# Install the service
+cd dist
+install.bat
 ```
 
-Then rebuild using:
+## Usage
 
-powershell
-`pyinstaller --onefile --noconsole proc_wolf.py`
+### Service Control
+Use `service_control.bat` for easy management:
+```
+1. STATUS  - Check service status
+2. START   - Start the service
+3. STOP    - Stop the service gracefully
+4. RESTART - Restart the service
+5. KILL    - Force kill all instances
+6. CLEAN   - Complete removal
+7. DEBUG   - Run in debug mode
+```
+
+### Command Line Interface
+```bash
+# List all processes with threat assessment
+ProcWolfCLI.exe list --assess
+
+# Assess a specific process
+ProcWolfCLI.exe assess --name suspicious.exe
+
+# Kill a dangerous process
+ProcWolfCLI.exe kill --name malware.exe
+
+# Complete removal of a process
+ProcWolfCLI.exe nuke --name virus.exe
+
+# View process history
+ProcWolfCLI.exe history
+
+# Real-time monitoring
+ProcWolfCLI.exe monitor
+```
+
+### System Tray Monitor
+Run `ProcWolf.exe` for a user-friendly system tray interface with:
+- Real-time notifications
+- Quick access to controls
+- Visual status indicators
+
+## Security Model
+
+### Threat Levels
+- **TRUSTED (0)**: Known legitimate processes
+- **LOW (1)**: Minor suspicion indicators
+- **MEDIUM (2)**: Multiple suspicious characteristics
+- **HIGH (3)**: Strong malware indicators
+- **CRITICAL (4)**: Confirmed malicious behavior
+
+### Action Thresholds
+- **MONITOR**: Observe only (LOW threat)
+- **WARN**: Alert user (MEDIUM threat, 10+ warnings)
+- **KILL**: Terminate process (MEDIUM threat, 20+ warnings)
+- **QUARANTINE**: Isolate executable (HIGH threat, 15+ warnings)
+- **NUKE**: Complete removal with resurrection prevention (CRITICAL threat, confirmed)
+
+## Configuration
+
+### Database Location
+`C:\ProgramData\proc-wolf\proc-wolf.db`
+
+### Log Files
+- Service logs: `C:\ProgramData\proc-wolf\proc-wolf-service.log`
+- Background logs: `%LOCALAPPDATA%\proc-wolf\proc-wolf-background.log`
+- CLI logs: `proc-wolf-cli.log` (executable directory)
+
+### Quarantine Directory
+`C:\ProgramData\proc-wolf\quarantine\`
+
+## 🏗️ Architecture
+
+```
+proc-wolf/
+├── proc_wolf.py            # Core monitoring engine
+├── proc_wolf_service.py    # Windows service wrapper
+├── proc_wolf_background.py # System tray application
+├── proc_wolf_full_4-0.py   # CLI interface
+├── windows_processes.py    # Windows process whitelist
+├── build_exe.py            # Build automation script
+├── service_control.bat
+| dist/                     # Compiled executables
+|   ├── ProcWolf.exe
+|   ├── ProcWolfCLI.exe
+|   ├── ProcWolfService.exe
+|   ├── install.bat
+|   ├── uninstall.bat
+|   └── service_control.bat
+├── README.md
+├── LICENCE.md
+├── CHANGELOG.md
+├── CODE_OF_CONDUCT.md
+├── CONTRIBTING.md
+└── SECURITY.md
+```
+
+## Version History
+
+### v4.1.1 (Current)
+- Fixed service startup/shutdown timing
+- Added graceful shutdown support
+- Auto-generated service control utilities
+- Improved build process
+
+### v4.1.0
+- Comprehensive Windows process recognition (216+ processes)
+- Fixed database schema issues
+- Conservative action thresholds
+- Self-protection mechanisms
+
+### v4.0.0
+- Initial public release
+- Multi-layered threat detection
+- Graduated response system
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## Disclaimer
+
+This software is provided as-is for educational and security research purposes. While extensively tested, use at your own risk. Always maintain backups and test in a controlled environment first.
+
+## License
+
+This project is licensed under a Hybrid MIT/CC0 License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Built with Python, psutil, and pywin32
+- Threat detection patterns inspired by industry best practices
+- Windows process identification based on official Microsoft documentation
+- Thnx to Claude Opus4.1 for all his fine halps
+
+## Support
+
+- **Issues**: [GitHub Issues](https://github.com/yourusername/proc-wolf/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/proc-wolf/discussions)
+- **Security**: For security vulnerabilities, please email directly
+
+---
+
+**Note**: Proc-Wolf is designed to be a defensive tool. It employs conservative thresholds and multiple confirmation steps before taking action against any process. The goal is protection without disruption of legitimate software.
+
+🐺 *"A disciplined guardian, not a rabid beast"*
 
 Made with love for all you system defenders out there. 🐺 Stay safe.
+
+---
