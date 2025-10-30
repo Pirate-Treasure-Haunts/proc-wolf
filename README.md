@@ -1,5 +1,4 @@
 [README.md]
-in the same folder as your .exe or on your GitHub page or anywhere you're sharing the tool.
 
 # 🐺 Proc-Wolf: Rogue Process & Service Removal Companion
 **Proc-Wolf** is a lightweight background daemon that watches for suspicious or unwanted processes and takes them out. But sometimes, you might need to go full ghostbuster mode when a stubborn service or malware leftover refuses to die. This guide walks you through both.
